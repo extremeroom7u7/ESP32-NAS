@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 NAS</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #121212;
+            color: #ffffff;
+        }
+        h1, h2 {
+            text-align: center;
+            color: #0078D7;
+        }
+        input, button {
+            width: 100%;
+            padding: 12px;
+            margin: 10px 0;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+        input {
+            background-color: #1e1e1e;
+            color: white;
+        }
+        button {
+            background-color: #0078D7;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+        }
+        button:hover {
+            background-color: #005A9E;
+        }
+        .delete-btn {
+            background-color: #D13438;
+        }
+        .delete-btn:hover {
+            background-color: #A80000;
+        }
+        #fileList, #dirList {
+            border: 1px solid #444;
+            padding: 15px;
+            background-color: #1e1e1e;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+        .file-item, .dir-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-bottom: 1px solid #444;
+        }
+        #progressContainer {
+            width: 100%;
+            background-color: #333;
+            border-radius: 5px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        #progressBar {
+            width: 0%;
+            height: 30px;
+            background: linear-gradient(90deg, #0078D7, #005A9E);
+            text-align: center;
+            line-height: 30px;
+            color: white;
+            font-weight: bold;
+            transition: width 0.4s ease-in-out;
+        }
+        #currentPath {
+            font-size: 18px;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #1e1e1e;
+            border-radius: 5px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <h1>ESP32 NAS</h1>
+    
+    <div id="currentPath">Current Path: /</div>
+    
+    <h2>File Upload</h2>
+    <input type="file" id="fileInput" multiple>
+    <button onclick="uploadFiles()">Upload Files</button>
+    
+    <div id="progressContainer">
+        <div id="progressBar">0%</div>
+    </div>
+    
+    <h2>Create Directory</h2>
+    <input type="text" id="dirName" placeholder="Directory Name">
+    <button onclick="createDirectory()">Create Directory</button>
+    
+    <h2>Directories</h2>
+    <div id="dirList"></div>
+    
+    <h2>Files</h2>
+    <div id="fileList"></div>
+
+    <script>
+        let currentPath = '/';
+
+        function updateProgressBar(percent) {
+            document.getElementById('progressBar').style.width = percent + '%';
+            document.getElementById('progressBar').innerHTML = percent + '%';
+        }
+
+        function resetProgressBar() {
+            document.getElementById('progressBar').style.width = '0%';
+            document.getElementById('progressBar').innerHTML = '0%';
+        }
+
+        function listContents() {
+            fetch('/list?path=' + encodeURIComponent(currentPath))
+                .then(response => response.json())
+                .then(data => {
+                    const dirList = document.getElementById('dirList');
+                    const fileList = document.getElementById('fileList');
+                    const currentPathDisplay = document.getElementById('currentPath');
+
+                    dirList.innerHTML = '';
+                    fileList.innerHTML = '';
+                    currentPathDisplay.innerHTML = 'Current Path: ' + currentPath;
+
+                    if (currentPath !== '/') {
+                        const backDir = currentPath.split('/').slice(0, -2).join('/') + '/';
+                        dirList.innerHTML += `<button onclick="openDirectory('${backDir}')">⬅ Back</button>`;
+                    }
+
+                    data.directories.forEach(dir => {
+                        dirList.innerHTML += `
+                            <div class="dir-item">
+                                📁 ${dir.name} 
+                                <button onclick="openDirectory('${dir.path}')">Open</button>
+                            </div>`;
+                    });
+
+                    data.files.forEach(file => {
+                        fileList.innerHTML += `
+                            <div class="file-item">
+                                📄 ${file.name} (${file.size} bytes) 
+                                <div>
+                                    <button onclick="downloadFile('${file.path}')">📥 Download</button>
+                                    <button class="delete-btn" onclick="deleteFile('${file.path}')">❌ Delete</button>
+                                </div>
+                            </div>`;
+                    });
+                });
+        }
+
+        function openDirectory(path) {
+            currentPath = path.endsWith('/') ? path : path + '/';
+            listContents();
+        }
+
+        function uploadFiles() {
+            const files = document.getElementById('fileInput').files;
+            const formData = new FormData();
+            
+            for (let file of files) {
+                formData.append('file', file);
+            }
+
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '/upload', true);
+
+            xhr.upload.onprogress = function(e) {
+                if (e.lengthComputable) {
+                    updateProgressBar(Math.round((e.loaded / e.total) * 100));
+                }
+            };
+
+            xhr.onload = function() {
+                if (xhr.status === 200) {
+                    listContents();
+                } else {
+                    alert('Upload failed');
+                }
+                resetProgressBar();
+            };
+
+            xhr.onerror = function() {
+                alert('Upload failed');
+                resetProgressBar();
+            };
+
+            xhr.send(formData);
+        }
+
+        function deleteFile(path) {
+            fetch('/delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'path=' + encodeURIComponent(path)
+            }).then(() => listContents());
+        }
+
+        function downloadFile(path) {
+            window.location.href = '/download?path=' + encodeURIComponent(path);
+        }
+
+        function createDirectory() {
+            const dirName = document.getElementById('dirName').value.trim();
+            if (!dirName) {
+                alert("Please enter a directory name!");
+                return;
+            }
+            fetch('/mkdir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: 'dir=' + encodeURIComponent(dirName)
+            }).then(() => listContents());
+        }
+
+        listContents();
+    </script>
+</body>
+</html>
