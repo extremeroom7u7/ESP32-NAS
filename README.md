@@ -1,2 +1,2 @@
 # ESP32-NAS
-just a random project i made. 
+i have currently been testing this project using a 32GB SD card. works just fine, any request or issue may be done through github and i will do my best to fix those issues.
